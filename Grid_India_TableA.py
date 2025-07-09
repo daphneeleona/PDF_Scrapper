@@ -44,27 +44,14 @@ def get_driver():
     options.add_argument("--metrics-recording-only")
     options.add_argument("--mute-audio")
 
-    # Dynamically detect Chromium binary
-    chromium_path = shutil.which("chromium") or shutil.which("google-chrome") or "/usr/bin/chromium"
+    # shutil.which("chromium") or shutil.which("google-chrome") or "/usr/bin/chromium"
     options.binary_location = chromium_path
 
-    # Try to extract major version from Chromium
-    version_output = subprocess.run([chromium_path, "--version"], stdout=subprocess.PIPE, text=True)
-    version_text = version_output.stdout.strip()
-    major_version = version_text.split(" ")[1].split(".")[0] if "Chromium" in version_text else None
-
-    # Use major version if available
-    if major_version:
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager(version=major_version).install()),
-            options=options
-        )
-    else:
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=options
-        )
-
+    # Use default ChromeDriverManager without version pinning
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options
+    )
     return driver
 
 # -------------------- Scraping Logic --------------------
