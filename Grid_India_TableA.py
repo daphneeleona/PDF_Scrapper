@@ -29,7 +29,7 @@ else:  # Assume Linux
     DRIVER_DIR = "/tmp/chromedriver120"
     DRIVER_PATH = os.path.join(DRIVER_DIR, "chromedriver")
 
-@st.experimental_singleton
+@st.cache(allow_output_mutation=True)
 def get_driver():
     if not os.path.exists(DRIVER_PATH):
         os.makedirs(DRIVER_DIR, exist_ok=True)
@@ -39,7 +39,6 @@ def get_driver():
             zip_ref.extractall(DRIVER_DIR)
         # Ensure executable permission on Linux
         if SYSTEM != "Windows":
-            st.info(f"Setting executable permissions on {DRIVER_PATH}")
             os.chmod(DRIVER_PATH, os.stat(DRIVER_PATH).st_mode | stat.S_IEXEC)
 
     options = Options()
@@ -51,10 +50,8 @@ def get_driver():
 
     # Set Chromium/Chrome binary location if needed
     if SYSTEM == "Windows":
-        # Typical Windows Chrome path - adjust if needed
         options.binary_location = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
     else:
-        # Common Linux chromium path in Streamlit Cloud
         if os.path.exists("/usr/bin/chromium-browser"):
             options.binary_location = "/usr/bin/chromium-browser"
         else:
