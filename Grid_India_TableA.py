@@ -4,6 +4,10 @@ import requests
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+import subprocess
+import shutil
+import urllib3
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
@@ -11,9 +15,16 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# -------------------- Chromium Version Detection --------------------
+def get_chromium_version():
+    try:
+        result = subprocess.run(["/usr/bin/chromium", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return result.stdout.strip()
+    except Exception as e:
+        return f"Error detecting Chromium version: {e}"
 
 # -------------------- WebDriver Setup --------------------
 @st.cache_resource
@@ -24,12 +35,36 @@ def get_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    options.binary_location = "/usr/bin/chromium"  # Adjust if needed
+    options.add_argument("--disable-software-rasterizer")
+    options.add_argument("--remote-debugging-port=9222")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-default-apps")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-sync")
+    options.add_argument("--metrics-recording-only")
+    options.add_argument("--mute-audio")
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager().install()),
-        options=options
-    )
+    # Dynamically detect Chromium binary
+    chromium_path = shutil.which("chromium") or shutil.which("google-chrome") or "/usr/bin/chromium"
+    options.binary_location = chromium_path
+
+    # Try to extract major version from Chromium
+    version_output = subprocess.run([chromium_path, "--version"], stdout=subprocess.PIPE, text=True)
+    version_text = version_output.stdout.strip()
+    major_version = version_text.split(" ")[1].split(".")[0] if "Chromium" in version_text else None
+
+    # Use major version if available
+    if major_version:
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager(version=major_version).install()),
+            options=options
+        )
+    else:
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=options
+        )
+
     return driver
 
 # -------------------- Scraping Logic --------------------
@@ -110,6 +145,10 @@ def process_excel_links(excel_links):
 # -------------------- Streamlit UI --------------------
 def main():
     st.title("Grid India PSP Report Extractor")
+
+    # Show Chromium version
+    st.caption("🔍 Chromium version detected:")
+    st.code(get_chromium_version())
 
     years = [f"{y}-{str(y+1)[-2:]}" for y in range(2023, 2026)]
     selected_year = st.selectbox("Select Financial Year", years[::-1])
