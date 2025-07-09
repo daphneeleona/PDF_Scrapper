@@ -6,3 +6,4 @@ webdriver-manager
 openpyxl
 xlrd
 seleniumbase
+urllib3
