@@ -26,14 +26,12 @@ def get_driver():
     # IMPORTANT: Specify your Chromium binary location here if different
     options.binary_location = "/usr/bin/chromium"
 
-    # Specify major ChromeDriver version matching your Chromium browser version 120
-    CHROME_DRIVER_VERSION = "120"
+   driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options
+    )
+    return driver
 
-    driver = webdriver.Chrome(
-        service=Service(ChromeDriverManager(version=CHROME_DRIVER_VERSION).install()),
-        options=options
-    )
-    return driver
 
 
 # --- Streamlit UI ---
