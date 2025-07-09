@@ -10,87 +10,56 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-import os
-import zipfile
-import urllib.request
-import platform
-import stat
+from webdriver_manager.chrome import ChromeDriverManager
 
-# -------- OS-based ChromeDriver setup --------
+st.set_page_config(page_title="Grid India PSP Report Extractor")
 
-SYSTEM = platform.system()
-
-if SYSTEM == "Windows":
-    CHROMEDRIVER_URL = "https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.224/win64/chromedriver-win64.zip"
-    DRIVER_DIR = os.path.join(os.getenv("TEMP", "C:\\temp"), "chromedriver120")
-    DRIVER_PATH = os.path.join(DRIVER_DIR, "chromedriver.exe")
-else:  # Assume Linux
-    CHROMEDRIVER_URL = "https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.224/linux64/chromedriver-linux64.zip"
-    DRIVER_DIR = "/tmp/chromedriver120"
-    DRIVER_PATH = os.path.join(DRIVER_DIR, "chromedriver")
-
-@st.cache(allow_output_mutation=True)
+@st.cache_resource
 def get_driver():
-    if not os.path.exists(DRIVER_PATH):
-        os.makedirs(DRIVER_DIR, exist_ok=True)
-        zip_path = os.path.join(DRIVER_DIR, "chromedriver.zip")
-        urllib.request.urlretrieve(CHROMEDRIVER_URL, zip_path)
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            zip_ref.extractall(DRIVER_DIR)
-        # Ensure executable permission on Linux
-        if SYSTEM != "Windows":
-            os.chmod(DRIVER_PATH, os.stat(DRIVER_PATH).st_mode | stat.S_IEXEC)
-
     options = Options()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless=new")  # Use new headless mode if available
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
+    # You can add more options if needed
 
-    # Set Chromium/Chrome binary location if needed
-    if SYSTEM == "Windows":
-        options.binary_location = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
-    else:
-        if os.path.exists("/usr/bin/chromium-browser"):
-            options.binary_location = "/usr/bin/chromium-browser"
-        else:
-            options.binary_location = "/usr/bin/chromium"
-
-    return webdriver.Chrome(service=Service(DRIVER_PATH), options=options)
-
-# -------- Streamlit UI and Scraping --------
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    return driver
 
 st.title("📊 Grid India PSP Report Extractor")
 
-years = ["2023-24", "2024-25", "2025-26"]
-selected_year = st.selectbox("Select Financial Year", years[::-1])
+# Years: 2023-24 to 2025-26 only, reversed order for UI
+years = [f"{y}-{str(y+1)[-2:]}" for y in range(2023, 2026)][::-1]
+selected_year = st.selectbox("Select Financial Year", years)
 
-months = ["ALL", "April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"]
+months = ["ALL", "April", "May", "June", "July", "August", "September",
+          "October", "November", "December", "January", "February", "March"]
 selected_month = st.selectbox("Select Month", months)
 
-if st.button("🔍 Extract Data"):
-    with st.spinner("Launching headless browser and scraping..."):
+if st.button("Extract Data"):
+    with st.spinner("Scraping data... Please wait. This might take some time for large selections."):
         driver = get_driver()
         driver.get("https://grid-india.in/en/reports/daily-psp-report")
         wait = WebDriverWait(driver, 30)
 
-        # Select financial year
-        dropdown1 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp .my-select__control")))
-        dropdown1.click()
-        option1 = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_year}')]")))
-        option1.click()
+        # Select year dropdown
+        dropdown_year = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp .my-select__control")))
+        dropdown_year.click()
+        year_option = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_year}')]")))
+        year_option.click()
 
-        # Select month
-        dropdown2 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp.me-1 .my-select__control")))
-        dropdown2.click()
-        option2 = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_month}')]")))
-        option2.click()
+        # Select month dropdown
+        dropdown_month = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp.me-1 .my-select__control")))
+        dropdown_month.click()
+        month_option = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_month}')]")))
+        month_option.click()
 
-        time.sleep(10)
+        time.sleep(5)  # Wait for data to load
 
         # Show 100 entries per page
-        Select(wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "select[aria-label='Choose a page size']")))).select_by_visible_text("100")
+        page_size_select = Select(wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "select[aria-label='Choose a page size']"))))
+        page_size_select.select_by_visible_text("100")
         time.sleep(5)
 
         excel_links = []
@@ -107,60 +76,64 @@ if st.button("🔍 Extract Data"):
                             try:
                                 date_str = href.split("/")[-1].split("_")[0]
                                 report_date = datetime.strptime(date_str, "%d.%m.%y")
-                                excel_links.append((report_date, href))
-                            except:
+                                # If user selected ALL months, accept all dates; else filter by selected month
+                                if selected_month == "ALL" or report_date.strftime("%B") == selected_month:
+                                    excel_links.append((report_date, href))
+                            except Exception:
                                 continue
             except Exception as e:
                 st.error(f"Error locating or reading the table: {e}")
 
-        # Extract links from all pages
+        # Extract from first page
         extract_links_from_table()
+
+        # Pagination: keep clicking 'Next Page' and extracting links until disabled
         while True:
             try:
                 next_button = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "button[aria-label='Next Page']")))
-                if not next_button.is_enabled():
+                if next_button.is_enabled():
+                    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
+                    time.sleep(1)
+                    next_button.click()
+                    time.sleep(5)  # wait for table to load
+                    extract_links_from_table()
+                else:
                     break
-                driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
-                time.sleep(1)
-                next_button.click()
-                time.sleep(5)
-                extract_links_from_table()
-            except Exception as e:
-                st.warning(f"No more pages or pagination failed: {e}")
+            except Exception:
+                # No more pages or error, exit loop
                 break
 
         driver.quit()
 
-        # Process Excel files
-        excel_links.sort(key=lambda x: x[0])
-        expected_columns1 = ["Region", "NR", "WR", "SR", "ER", "NER", "Total", "Remarks"]
-        table1_combined = []
-
-        for report_date, url in excel_links:
-            try:
-                response = requests.get(url, verify=False)
-                if response.status_code == 200:
-                    ext = url.split(".")[-1].lower()
-                    engine = "openpyxl" if ext == "xlsx" else "xlrd"
-                    df_full = pd.read_excel(BytesIO(response.content), sheet_name="MOP_E", engine=engine, header=None)
-                    df1 = df_full.iloc[5:13, :8].copy()
-                    df1.columns = expected_columns1
-                    df1.insert(0, "Date", report_date.strftime("%d-%m-%Y"))
-                    table1_combined.append(df1)
-            except Exception as e:
-                st.warning(f"Failed to process {url}: {e}")
-
-        if table1_combined:
-            final_df = pd.concat(table1_combined, ignore_index=True)
-            output = BytesIO()
-            final_df.to_excel(output, index=False)
-            st.success("✅ Data extraction complete!")
-
-            st.download_button(
-                label="📥 Download Excel",
-                data=output.getvalue(),
-                file_name="GridIndia_PSP_Report.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        if not excel_links:
+            st.error("No PSP Excel report links found for the selected filters.")
         else:
-            st.error("⚠️ No data extracted.")
+            # Sort links by date ascending
+            excel_links.sort(key=lambda x: x[0])
+
+            expected_columns1 = ["Region", "NR", "WR", "SR", "ER", "NER", "Total", "Remarks"]
+            table1_combined = []
+
+            for report_date, url in excel_links:
+                try:
+                    response = requests.get(url, verify=False, timeout=30)
+                    if response.status_code == 200:
+                        ext = url.split(".")[-1].lower()
+                        engine = "openpyxl" if ext == "xlsx" else "xlrd"
+                        df_full = pd.read_excel(BytesIO(response.content), sheet_name="MOP_E", engine=engine, header=None)
+                        df1 = df_full.iloc[5:13, :8].copy()
+                        df1.columns = expected_columns1
+                        df1.insert(0, "Date", report_date.strftime("%d-%m-%Y"))
+                        table1_combined.append(df1)
+                except Exception as e:
+                    st.warning(f"Failed to process {url}: {e}")
+
+            if table1_combined:
+                final_df = pd.concat(table1_combined, ignore_index=True)
+                output = BytesIO()
+                final_df.to_excel(output, index=False)
+                output.seek(0)
+                st.success(f"Data extraction complete! Extracted {len(table1_combined)} reports.")
+
+                st.download_button(
+                    label="📥 Download Excel",
