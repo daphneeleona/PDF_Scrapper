@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 from io import BytesIO
 from datetime import datetime
+
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
@@ -12,55 +13,61 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 
-st.set_page_config(page_title="Grid India PSP Report Extractor")
 
 @st.cache_resource
 def get_driver():
     options = Options()
-    options.add_argument("--headless=new")  # Use new headless mode if available
+    options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    # You can add more options if needed
 
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    # IMPORTANT: Specify your Chromium binary location here if different
+    options.binary_location = "/usr/bin/chromium"
+
+    # Specify major ChromeDriver version matching your Chromium browser version 120
+    CHROME_DRIVER_VERSION = "120"
+
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager(version=CHROME_DRIVER_VERSION).install()),
+        options=options
+    )
     return driver
 
-st.title("📊 Grid India PSP Report Extractor")
 
-# Years: 2023-24 to 2025-26 only, reversed order for UI
-years = [f"{y}-{str(y+1)[-2:]}" for y in range(2023, 2026)][::-1]
-selected_year = st.selectbox("Select Financial Year", years)
+# --- Streamlit UI ---
+st.title("Grid India PSP Report Extractor")
 
-months = ["ALL", "April", "May", "June", "July", "August", "September",
-          "October", "November", "December", "January", "February", "March"]
+years = [f"{y}-{str(y+1)[-2:]}" for y in range(2023, 2026)]  # Updated years 2023-24 to 2025-26
+selected_year = st.selectbox("Select Financial Year", years[::-1])
+
+months = ["ALL", "April", "May", "June", "July", "August", "September", "October", "November", "December", "January", "February", "March"]
 selected_month = st.selectbox("Select Month", months)
 
 if st.button("Extract Data"):
-    with st.spinner("Scraping data... Please wait. This might take some time for large selections."):
+    with st.spinner("Scraping data... Please wait."):
         driver = get_driver()
         driver.get("https://grid-india.in/en/reports/daily-psp-report")
         wait = WebDriverWait(driver, 30)
 
         # Select year dropdown
-        dropdown_year = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp .my-select__control")))
-        dropdown_year.click()
-        year_option = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_year}')]")))
-        year_option.click()
+        dropdown1 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp .my-select__control")))
+        dropdown1.click()
+        option1 = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_year}')]")))
+        option1.click()
 
         # Select month dropdown
-        dropdown_month = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp.me-1 .my-select__control")))
-        dropdown_month.click()
-        month_option = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_month}')]")))
-        month_option.click()
+        dropdown2 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp.me-1 .my-select__control")))
+        dropdown2.click()
+        option2 = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_month}')]")))
+        option2.click()
 
-        time.sleep(5)  # Wait for data to load
+        time.sleep(10)
 
         # Show 100 entries per page
-        page_size_select = Select(wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "select[aria-label='Choose a page size']"))))
-        page_size_select.select_by_visible_text("100")
-        time.sleep(5)
+        Select(wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "select[aria-label='Choose a page size']")))).select_by_visible_text("100")
+        time.sleep(10)
 
         excel_links = []
 
@@ -76,18 +83,16 @@ if st.button("Extract Data"):
                             try:
                                 date_str = href.split("/")[-1].split("_")[0]
                                 report_date = datetime.strptime(date_str, "%d.%m.%y")
-                                # If user selected ALL months, accept all dates; else filter by selected month
-                                if selected_month == "ALL" or report_date.strftime("%B") == selected_month:
-                                    excel_links.append((report_date, href))
-                            except Exception:
+                                # Removed hardcoded month filter to allow all months
+                                excel_links.append((report_date, href))
+                            except:
                                 continue
             except Exception as e:
                 st.error(f"Error locating or reading the table: {e}")
 
-        # Extract from first page
         extract_links_from_table()
 
-        # Pagination: keep clicking 'Next Page' and extracting links until disabled
+        # Handle pagination: Keep clicking 'Next Page' until disabled or error
         while True:
             try:
                 next_button = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "button[aria-label='Next Page']")))
@@ -95,46 +100,48 @@ if st.button("Extract Data"):
                     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", next_button)
                     time.sleep(1)
                     next_button.click()
-                    time.sleep(5)  # wait for table to load
+                    time.sleep(5)
                     extract_links_from_table()
                 else:
                     break
-            except Exception:
-                # No more pages or error, exit loop
+            except Exception as e:
+                # No more pages or error, stop pagination loop
                 break
 
         driver.quit()
 
-        if not excel_links:
-            st.error("No PSP Excel report links found for the selected filters.")
+        # Process Excel files
+        excel_links.sort(key=lambda x: x[0])
+        expected_columns1 = ["Region", "NR", "WR", "SR", "ER", "NER", "Total", "Remarks"]
+        table1_combined = []
+
+        for report_date, url in excel_links:
+            try:
+                response = requests.get(url, verify=False)
+                if response.status_code == 200:
+                    ext = url.split(".")[-1].lower()
+                    engine = "openpyxl" if ext == "xlsx" else "xlrd"
+                    df_full = pd.read_excel(BytesIO(response.content), sheet_name="MOP_E", engine=engine, header=None)
+                    df1 = df_full.iloc[5:13, :8].copy()
+                    df1.columns = expected_columns1
+                    df1.insert(0, "Date", report_date.strftime("%d-%m-%Y"))
+                    table1_combined.append(df1)
+            except Exception as e:
+                st.warning(f"Failed to process {url}: {e}")
+
+        if table1_combined:
+            final_df = pd.concat(table1_combined, ignore_index=True)
+            output = BytesIO()
+            final_df.to_excel(output, index=False)
+            output.seek(0)
+
+            st.success(f"Data extraction complete! Extracted {len(table1_combined)} reports.")
+
+            st.download_button(
+                label="📥 Download Excel",
+                data=output,
+                file_name="Grid_India_PSP_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
         else:
-            # Sort links by date ascending
-            excel_links.sort(key=lambda x: x[0])
-
-            expected_columns1 = ["Region", "NR", "WR", "SR", "ER", "NER", "Total", "Remarks"]
-            table1_combined = []
-
-            for report_date, url in excel_links:
-                try:
-                    response = requests.get(url, verify=False, timeout=30)
-                    if response.status_code == 200:
-                        ext = url.split(".")[-1].lower()
-                        engine = "openpyxl" if ext == "xlsx" else "xlrd"
-                        df_full = pd.read_excel(BytesIO(response.content), sheet_name="MOP_E", engine=engine, header=None)
-                        df1 = df_full.iloc[5:13, :8].copy()
-                        df1.columns = expected_columns1
-                        df1.insert(0, "Date", report_date.strftime("%d-%m-%Y"))
-                        table1_combined.append(df1)
-                except Exception as e:
-                    st.warning(f"Failed to process {url}: {e}")
-
-            if table1_combined:
-                final_df = pd.concat(table1_combined, ignore_index=True)
-                output = BytesIO()
-                final_df.to_excel(output, index=False)
-                output.seek(0)
-                st.success(f"Data extraction complete! Extracted {len(table1_combined)} reports.")
-
-                st.download_button(
-                    label="📥 Download Excel",
-                )
+            st.error("No data extracted.")
