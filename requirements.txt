@@ -1,7 +1,7 @@
 streamlit
-selenium
 pandas
+requests
+selenium
+webdriver-manager
 openpyxl
 xlrd
-requests
-webdriver-manager
