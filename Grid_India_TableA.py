@@ -10,38 +10,62 @@ from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 import os
+import zipfile
+import urllib.request
+import platform
+import stat
 
-# ---------------------------
-# ✅ Minimal, Streamlit-safe Driver Setup
-# ---------------------------
+# -------- OS-based ChromeDriver setup --------
 
-options = Options()
-options.add_argument("--headless=new")
-options.add_argument("--disable-gpu")
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-options.add_argument("--window-size=1920,1080")
-options.add_argument("--disable-blink-features=AutomationControlled")
+SYSTEM = platform.system()
 
-# Explicitly point to Chromium binary (for Streamlit Cloud)
-chrome_path = "/usr/bin/chromium"
-if os.path.exists("/usr/bin/chromium-browser"):
-    chrome_path = "/usr/bin/chromium-browser"
-options.binary_location = chrome_path
+if SYSTEM == "Windows":
+    CHROMEDRIVER_URL = "https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.224/win64/chromedriver-win64.zip"
+    DRIVER_DIR = os.path.join(os.getenv("TEMP", "C:\\temp"), "chromedriver120")
+    DRIVER_PATH = os.path.join(DRIVER_DIR, "chromedriver.exe")
+else:  # Assume Linux
+    CHROMEDRIVER_URL = "https://storage.googleapis.com/chrome-for-testing-public/120.0.6099.224/linux64/chromedriver-linux64.zip"
+    DRIVER_DIR = "/tmp/chromedriver120"
+    DRIVER_PATH = os.path.join(DRIVER_DIR, "chromedriver")
 
 @st.experimental_singleton
 def get_driver():
-    return webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    if not os.path.exists(DRIVER_PATH):
+        os.makedirs(DRIVER_DIR, exist_ok=True)
+        zip_path = os.path.join(DRIVER_DIR, "chromedriver.zip")
+        urllib.request.urlretrieve(CHROMEDRIVER_URL, zip_path)
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(DRIVER_DIR)
+        # Ensure executable permission on Linux
+        if SYSTEM != "Windows":
+            st.info(f"Setting executable permissions on {DRIVER_PATH}")
+            os.chmod(DRIVER_PATH, os.stat(DRIVER_PATH).st_mode | stat.S_IEXEC)
 
-# ---------------------------
-# ✅ Streamlit UI
-# ---------------------------
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+
+    # Set Chromium/Chrome binary location if needed
+    if SYSTEM == "Windows":
+        # Typical Windows Chrome path - adjust if needed
+        options.binary_location = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+    else:
+        # Common Linux chromium path in Streamlit Cloud
+        if os.path.exists("/usr/bin/chromium-browser"):
+            options.binary_location = "/usr/bin/chromium-browser"
+        else:
+            options.binary_location = "/usr/bin/chromium"
+
+    return webdriver.Chrome(service=Service(DRIVER_PATH), options=options)
+
+# -------- Streamlit UI and Scraping --------
 
 st.title("📊 Grid India PSP Report Extractor")
 
-# Financial years limited to 2023–24 through 2025–26
 years = ["2023-24", "2024-25", "2025-26"]
 selected_year = st.selectbox("Select Financial Year", years[::-1])
 
@@ -49,18 +73,18 @@ months = ["ALL", "April", "May", "June", "July", "August", "September", "October
 selected_month = st.selectbox("Select Month", months)
 
 if st.button("🔍 Extract Data"):
-    with st.spinner("Launching headless browser... Please wait."):
+    with st.spinner("Launching headless browser and scraping..."):
         driver = get_driver()
         driver.get("https://grid-india.in/en/reports/daily-psp-report")
         wait = WebDriverWait(driver, 30)
 
-        # --- Select financial year ---
+        # Select financial year
         dropdown1 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp .my-select__control")))
         dropdown1.click()
         option1 = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_year}')]")))
         option1.click()
 
-        # --- Select month ---
+        # Select month
         dropdown2 = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, ".period_drp.me-1 .my-select__control")))
         dropdown2.click()
         option2 = wait.until(EC.element_to_be_clickable((By.XPATH, f"//div[contains(text(), '{selected_month}')]")))
@@ -68,7 +92,7 @@ if st.button("🔍 Extract Data"):
 
         time.sleep(10)
 
-        # --- Show 100 entries per page ---
+        # Show 100 entries per page
         Select(wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "select[aria-label='Choose a page size']")))).select_by_visible_text("100")
         time.sleep(5)
 
@@ -92,7 +116,7 @@ if st.button("🔍 Extract Data"):
             except Exception as e:
                 st.error(f"Error locating or reading the table: {e}")
 
-        # ✅ Extract all paginated results
+        # Extract links from all pages
         extract_links_from_table()
         while True:
             try:
@@ -110,10 +134,7 @@ if st.button("🔍 Extract Data"):
 
         driver.quit()
 
-        # ---------------------------
-        # ✅ Download + Process Excel files
-        # ---------------------------
-
+        # Process Excel files
         excel_links.sort(key=lambda x: x[0])
         expected_columns1 = ["Region", "NR", "WR", "SR", "ER", "NER", "Total", "Remarks"]
         table1_combined = []
